@@ -1,0 +1,249 @@
+1. ROLE AND OBJECTIVE
+
+You are a senior AI Solutions Architect, Machine Learning Engineer, and UI/UX Designer. Build BritConnect AI Customer Churn Intelligence Platform, a production-quality, responsive web application for a UK telecommunications provider. The platform lets executives, retention managers, and analysts upload customer data, predict churn, understand why customers leave, and act on personalised retention plans.
+
+Build the full working application. Do not produce mockups or placeholder screens. Every page, chart, calculation, export, and chatbot answer must run on the user’s uploaded data.
+
+2. TECH STACK
+Frontend: React + TypeScript, Vite, Tailwind CSS, React Router.
+Charts: Recharts (or ECharts). Use one shared chart theme across the app.
+Data parsing: SheetJS (xlsx), PapaParse (CSV), native JSON, plus TSV, TXT (delimiter auto-detect), XML, and Parquet where a library is available.
+ML in-browser: implement from scratch or via a library such as ml-random-forest, ml-logistic-regression, or TensorFlow.js: Logistic Regression, Random Forest, Gradient Boosting (or XGBoost-style boosted trees). Run training in a Web Worker so the UI never freezes.
+Persistence: IndexedDB (via Dexie) for datasets, cleaned data, trained models, scores, campaigns, chat history, and settings.
+AI layer: Gemini API (@google/genai) for the chatbot and retention recommendations. Read the key from an environment variable and never hard-code it. All numbers sent to Gemini must be pre-computed by the app’s own code, so the LLM narrates facts and never invents them.
+Reports: jsPDF + html2canvas for PDF, SheetJS for Excel, CSV and JSON exports.
+3. DATA DICTIONARY (SOURCE OF TRUTH)
+
+The expected schema is 38 columns. Build the schema as a config object, not scattered strings.
+
+#	Column	Type
+1	Customer ID	Text (unique key)
+2	Customer Segment	Text (e.g. Consumer, Small Business)
+3	Age	Whole number
+4	Age Band	Text
+5	Gender	Text
+6	UK Nation	Text
+7	City	Text
+8	Acquisition Channel	Text
+9	Join Date	Date
+10	Tenure Months	Whole number
+11	Service Type	Text
+12	Plan Name	Text
+13	Contract Type	Text
+14	Contract Start Date	Date
+15	Contract End Date	Date (nullable)
+16	Auto Renew	Text (Yes/No)
+17	Monthly Charge GBP	Decimal
+18	Average Monthly Usage GB	Decimal
+19	Data Allowance GB	Whole number
+20	Overage Charges GBP	Decimal
+21	Discount Percent	Decimal
+22	Payment Method	Text
+23	Direct Debit	Text (Yes/No)
+24	Late Payments 12M	Whole number
+25	Failed Payments 12M	Whole number
+26	Support Tickets 12M	Whole number
+27	Complaints 12M	Whole number
+28	Average Resolution Hours	Decimal
+29	Network Outages 12M	Whole number
+30	Satisfaction Score 1 10	Whole number (1–10)
+31	NPS Score	Whole number (higher means stronger advocacy)
+32	Competitor Offer Received	Text (Yes/No)
+33	Churn Status	Text (Active / Churned)
+34	Churn Date	Date (blank for active)
+35	Churn Reason	Text (blank for active)
+36	Lifetime Revenue GBP	Decimal
+37	Monthly Revenue At Risk GBP	Decimal
+38	Churn Flag	Whole number (1 = Churned, 0 = Active)
+
+Target variable: Churn Flag. If it is missing, derive it from Churn Status. If the two disagree, flag the row in the validation report.
+
+Critical leakage rule: Churn Status, Churn Date, Churn Reason, Churn Flag, and Monthly Revenue At Risk GBP must never be used as model inputs. Churn Reason and Churn Date exist only after a customer has left. Customer ID is an identifier only. Lifetime Revenue GBP and Tenure Months are checked for leakage (churned customers stop accumulating revenue), and the app shows the user a warning with a toggle to include or exclude them. The default is to keep Tenure Months and exclude Lifetime Revenue GBP from training while using it for value weighting.
+
+Schema flexibility: match uploaded columns to the schema using fuzzy name matching (case, spaces, underscores, synonyms). If columns differ, show a column-mapping screen where users map their columns to the expected fields. Unmapped optional columns are skipped gracefully, and the app still works with a reduced feature set as long as a churn target and Customer ID exist.
+
+4. DESIGN SYSTEM
+
+Palette (define as CSS variables and Tailwind tokens):
+
+Navy primary: 
+#0B1F3A (deep), 
+#13294B, 
+#1F3A66
+Gold accent: 
+#C9A227, 
+#E0BB4A (light), 
+#A8841A (dark)
+Dark red (risk/alert): 
+#8B1A1A, 
+#A52A2A (light), 
+#5E1111 (deep)
+Neutrals: off-white 
+#F7F5EF, warm grey 
+#E6E2D6, text 
+#1A1A1A, muted 
+#5C6370
+
+Colour logic: navy = primary data and structure, gold = highlights, benchmarks and positive emphasis, dark red = churn, risk and negative change. Risk tiers: Low = navy, Medium = gold, High = dark red, Critical = deep dark red. Use a shared categorical sequence (navy, gold, dark red, then tints of each) so a category keeps the same colour across every chart.
+
+Layout: left navy sidebar with gold active indicator, top bar with dataset name, last-updated time, and global filters. Typography: a serif for headings (e.g. Playfair Display) and a clean sans for UI and data (e.g. Inter). Rounded cards, soft shadows, 8px spacing grid. Fully responsive: sidebar collapses to a drawer on mobile, KPI cards stack, tables scroll horizontally, charts resize. Include a light mode (default) and an optional dark navy mode. Meet WCAG AA contrast, with keyboard navigation and ARIA labels.
+
+Chart standards (apply to every chart through one shared wrapper component):
+
+No gridlines (no vertical or horizontal gridlines). Use only a subtle baseline axis. Show data labels directly on bars, lines’ endpoints, and donut segments instead.
+Every chart has a title, a subtitle stating the metric and time window, labelled axes with units (£, %, months, GB), a legend only when there is more than one series, and a source or filter note.
+Consistent number formats: £ with thousands separators (£1,234.56 and compact £1.2M), percentages to one decimal place, counts with separators.
+Rounded bar corners, smooth lines, gold reference lines for averages or targets, informative tooltips (value, share, and comparison to average), and smooth load animation.
+Sort bars by value unless the axis is ordinal or temporal. Limit donuts to six segments and group the rest as “Other”.
+Empty, loading, and error states for each chart. Every chart has a “Download PNG” and “Download data (CSV)” action.
+5. APPLICATION PAGES AND NAVIGATION
+
+Sidebar order:
+
+Home / Data Hub
+Executive Dashboard
+Churn Drivers & Explainability
+Model Lab
+Customer Scoring
+Segmentation
+Retention Recommendations
+Campaign Tracker
+AI Analyst (Chatbot)
+Reports
+Settings & Data Management
+5.1 Data Hub (upload, validation, cleaning)
+Drag-and-drop and file picker for .csv, .xlsx, .xls, .json, .tsv, .txt, .xml, .parquet. Multi-sheet Excel: let the user pick a sheet. Show a preview of the first 50 rows, row and column counts, and detected types.
+Persistence rule: uploaded data is saved to IndexedDB and remains available across sessions until the user adds new data. On new upload, offer three choices: Replace the dataset, Append (merge by Customer ID with a chosen conflict rule: keep newest, keep existing, or keep both flagged), or Save as a new version. Keep a version history (name, date, rows, quality score) with the ability to restore or delete a version. Never delete data silently, and always confirm destructive actions. Retrain models automatically or on request after new data is added, and flag existing scores as stale.
+Validation report (downloadable): required columns present, type mismatches, duplicate Customer IDs, missing values per column (count and %), out-of-range values (Age outside 16–110, Satisfaction outside 1–10, negative charges, Discount outside 0–100, Usage far above Allowance as a warning), date logic (Join Date after Contract Start, Contract End before Start, Churn Date before Join Date, Churn Date present for Active customers), consistency checks (Churn Flag versus Churn Status, Tenure Months versus dates, Age versus Age Band, Direct Debit versus Payment Method), and outliers (IQR or z-score). Produce a 0–100 Data Quality Score with severity tiers (Error, Warning, Info).
+Automatic cleaning pipeline (every step logged and reversible, with a before/after summary):
+Trim whitespace, standardise casing and category spellings (merge “direct debit”/”Direct Debit”), standardise Yes/No variants (Y, 1, True), parse dates in UK format dd/mm/yyyy as well as ISO.
+Remove exact duplicates, resolve duplicate IDs by keeping the most complete or most recent record.
+Missing values: numeric median (grouped by Customer Segment where sensible), categorical mode or “Unknown”, structurally blank fields (Churn Date and Reason for active customers) are left blank and not imputed. Add missingness indicator flags for high-missing columns.
+Winsorise extreme outliers at the 1st and 99th percentiles (configurable) and record what was capped.
+Recompute derived fields where inconsistent (Tenure Months from dates, Age Band from Age).
+Let users review, override, or disable any step.
+5.2 Feature engineering (automatic)
+
+Create and document these features (show a feature catalogue with definitions):
+
+Usage_to_Allowance_Ratio (usage ÷ allowance, safe division), Overage_Flag, Overage_Share_of_Bill
+Effective_Monthly_Charge (charge after discount), Discount_Dependence
+Months_to_Contract_End (relative to a configurable “as of” date, defaulting to the latest date in the data), Contract_Expiring_90d, Out_of_Contract_Flag
+Payment_Risk_Score (late + failed payments, weighted), Payment_Failure_Rate
+Service_Friction_Index (tickets, complaints, resolution hours, outages, standardised and combined), Complaint_Rate_per_Ticket, Slow_Resolution_Flag
+Satisfaction_Band, NPS_Category (Detractor 0–6, Passive 7–8, Promoter 9–10 if scale is 0–10; infer the scale from the data and state the assumption), Sat_NPS_Gap
+Tenure_Band, Lifecycle_Stage, Price_per_GB
+Competitor_Pressure interactions (competitor offer × low satisfaction, competitor offer × contract expiring)
+Encoding: one-hot for low-cardinality categories, target-safe frequency or smoothed target encoding for high-cardinality (City, Plan Name) computed inside cross-validation folds to avoid leakage. Scale numeric features for linear models.
+5.3 Model Lab (training and evaluation)
+Models: Logistic Regression (L2), Random Forest, Gradient Boosting. Optional: a simple baseline (majority class) shown for comparison.
+Split and validation: stratified train/validation/test split (default 70/15/15, user-adjustable) plus stratified 5-fold cross-validation on the training set. Set a random seed for reproducibility and record it. Where the dataset has dates, offer an optional time-based split.
+Class imbalance: detect it and apply class weights or SMOTE-style oversampling on the training folds only, never on validation or test data.
+Tuning: a light grid or random search with a visible progress bar and a cancel button.
+Metrics (computed on the held-out test set, with CV mean ± SD): ROC-AUC, PR-AUC, accuracy, precision, recall, F1, balanced accuracy, Brier score, log loss, and the confusion matrix. Verify every metric against a hand-checked formula in unit tests.
+Charts: ROC curve, precision-recall curve, confusion matrix heatmap (navy scale, labelled cells), calibration plot, lift and cumulative gains chart, and a model comparison bar chart.
+Threshold tuning: an interactive slider showing precision, recall, F1, and expected profit (inputs: average retention offer cost, save rate, monthly charge, assumed remaining lifetime). Recommend a threshold and let the user lock it.
+Automatically pick the champion model by a user-selected criterion (default PR-AUC), save it with its feature list, threshold, training date, and metrics, and keep a model registry with versions. Display a plain-English model summary and flag overfitting (train versus test gap), small samples, and low-quality data.
+Export the model summary as a PDF and the model’s parameters as JSON.
+5.4 Customer Scoring
+Score all customers on upload or retrain: churn probability (0–100%), risk tier (Low <25%, Medium 25–50%, High 50–75%, Critical ≥75%, thresholds configurable), rank, and Revenue at Risk (probability × Monthly Charge, and a 12-month expected loss).
+Searchable, sortable, filterable table (by segment, nation, city, plan, contract, tier, tenure band) with pagination or virtual scrolling for 100k+ rows, column chooser, and CSV/Excel export of filtered results.
+Individual customer view (search by Customer ID): a profile card, a risk gauge, the top 5–8 reasons (SHAP-style local contributions shown as a labelled horizontal waterfall: dark red pushes churn up, navy pushes it down), a comparison with the segment average, a timeline of key events (contract end, tickets, outages), and a generated retention plan.
+Scoring a new customer manually: a validated form with the key fields, producing a probability, tier, and drivers instantly.
+Batch scoring of new files: upload a file with no churn labels, validate it, score it with the champion model, and download it.
+5.5 Churn Drivers & Explainability
+Global importance: permutation importance (model-agnostic) plus coefficients (logistic) or split gain (trees), shown as a horizontal bar chart with labels. Include a SHAP-style summary using sampled kernel or tree-based approximations if feasible.
+Partial dependence charts for the top drivers (e.g. satisfaction, tenure, months to contract end, outages), annotated with the observed churn rate.
+Descriptive driver analysis: churn rate by Contract Type, Plan, Service Type, Acquisition Channel, UK Nation, Age Band, Payment Method, Auto Renew, Competitor Offer Received, Satisfaction band, outages band, and complaints band, with sample sizes shown and statistical significance (chi-square or z-test) flagged. Show Churn Reason analysis (Pareto chart of reasons, plus reasons by segment), which is allowed because it is descriptive and not a model input.
+A plain-English “What drives churn at BritConnect” summary generated by Gemini from the computed statistics, each claim linked to the underlying chart or number.
+5.6 Executive Dashboard
+
+Global filters: segment, service type, UK Nation, city, plan, contract type, acquisition channel, date range (Join or Churn date). All visuals update together, with a filter-summary chip row and a reset button.
+
+KPI cards (each with trend versus the prior period, where dates allow): Total Customers, Active Customers, Churned Customers, Churn Rate %, Average Tenure, ARPU (Average Monthly Charge), Monthly Revenue At Risk (£) (sum of the dataset column, plus model-predicted at-risk revenue for active customers), Lifetime Revenue, Average Satisfaction, Average NPS (and NPS category split), High and Critical risk customers.
+
+Charts:
+
+Churn rate by contract type, service type, plan, segment, UK Nation, age band, acquisition channel, and payment method.
+Churn over time by Churn Date (monthly), with cohort retention curves by Join Date quarter (a retention heatmap using a navy-to-gold scale with labelled cells).
+Churn Reason Pareto.
+Risk tier distribution (donut) and revenue at risk by tier (bar).
+Satisfaction and NPS versus churn rate, an outage and complaints impact view, and a tenure-band churn curve.
+Top 10 highest-revenue-at-risk customers (table with action buttons).
+Geographic view: churn by UK Nation and a city ranking (bar charts are acceptable; a map is optional).
+Chart annotations call out the largest findings automatically (e.g. “Month-to-month contracts churn at 3.1× the rate of 24-month contracts”).
+
+An AI Executive Summary card at the top: a five-to-seven-bullet narrative generated from the computed KPIs, with a “Regenerate” button and the underlying figures shown on hover.
+
+5.7 Segmentation
+Rule-based segments (business-readable): e.g. “Price-Sensitive Out-of-Contract”, “Service-Frustrated High Value”, “Silent Disengaged”, “Payment-Stressed”, “Competitor-Targeted”, “Loyal Promoters”.
+Behavioural clustering: K-means (K selectable 2–8, with an elbow and silhouette chart recommending K) on standardised features, with automatic cluster naming from dominant traits.
+Per segment: size, share, churn rate, average predicted risk, ARPU, revenue at risk, average satisfaction, top drivers, and a recommended strategy. Include a segment comparison table (heat-shaded), a bubble chart (x = churn rate, y = ARPU, size = customers), and a “Download segment list” button.
+5.8 Retention Recommendations (AI-generated)
+
+For an individual customer, a segment, or the top-N at-risk customers, generate plans using Gemini with a structured JSON schema and the app’s computed evidence. Every recommendation must include:
+
+Diagnosis and evidence: the specific drivers with real values (e.g. “3 outages and 2 complaints in 12 months; resolution time 41 h versus a 18 h segment average; contract ends in 2 months; competitor offer received”).
+Personalised actions: concrete offers or interventions matched to the drivers (proactive service credit, plan right-sizing when usage nears or exceeds allowance, loyalty-contract incentive with a discount, payment-plan support, engineer visit, executive escalation, competitor price-match, upgrade or downgrade).
+Priority (P1 immediate within 48 h, P2 within 2 weeks, P3 within 30–60 days) and an owner (e.g. Retention Team, Network Ops, Billing, CX).
+Step-by-step implementation plan with channel (phone, SMS, email, app), timing, script outline or message theme, and offer guardrails (maximum discount, approval needed).
+Expected business impact: estimated save-rate range, retained monthly and annual revenue (£), cost of the intervention, net ROI, and payback period. State all assumptions, and make the assumptions editable (save rate, offer cost, margin) with the figures recalculating live.
+Measurable KPIs with baseline, target, and review date (e.g. “Churn rate of this segment: 24% → 18% in 90 days”, “Repeat complaints: 2.1 → 1.0”, “Save-offer acceptance ≥ 30%”, “NPS +8 points”).
+Risks and compliance notes: UK GDPR and PECR consent for marketing contact, Ofcom rules on fair treatment and contract-ending notifications, and no use of protected characteristics (Gender, Age) as the basis for differential offers. Do not recommend actions that are discriminatory.
+A confidence level with the rationale, and a clear label separating data-backed claims from assumptions.
+
+Prompting rules for Gemini: use only supplied facts, never invent figures, return valid JSON that the UI renders into formatted cards, handle API failures with a retry and a rule-based fallback recommendation engine (so the feature still works offline). Provide Approve, Edit, and Send to Campaign Tracker buttons, and export plans to PDF, Word-compatible text, and CSV.
+
+5.9 Campaign Tracker
+Create campaigns (name, objective, target segment or saved customer list, channel, offer, start and end date, budget, owner).
+Auto-build the target list from risk tier or segment, and create a control group (randomised holdout, configurable %) for true uplift measurement.
+Upload results (or mark outcomes manually): contacted, responded, accepted offer, retained, churned, cost.
+Metrics: reach, response rate, acceptance rate, save rate, churn rate (treated versus control), uplift with confidence interval and significance test, revenue retained, cost, ROI, cost per save, and payback.
+Charts: funnel (targeted → contacted → responded → accepted → retained), campaign comparison, treated-versus-control churn over time, ROI ranking, and a cumulative revenue-saved line.
+Campaign status board (Draft, Active, Completed) and a lessons-learned note field. Feed completed campaign outcomes back to calibrate the save-rate assumptions used in the recommendations.
+5.10 AI Analyst (Chatbot)
+A chat interface that answers natural-language questions about the data, models, segments, and campaigns (e.g. “Which contract type has the highest churn?”, “Show churn by UK Nation as a chart”, “Why is customer BC-10432 high risk?”, “How much revenue is at risk in the Critical tier?”, “Compare the Consumer and Small Business segments”, “What should we do about customers with repeated outages?”).
+Architecture (to guarantee accuracy): the LLM translates the question into a structured query or a tool call (aggregate, filter, group, correlate, score customer, explain customer, compare segments, create chart, build list). The app executes it against the real data in code and returns the result, and the LLM then explains it. The chatbot must never calculate from memory or guess. Cite the filters and row counts used under each answer (“Based on 8,412 active customers, filter: Consumer”).
+Responses can include inline charts (using the same chart theme), tables, downloadable lists, and “Follow-up question” suggestion chips. Support multi-turn context, exporting a chat as PDF, saving charts to a report, and clearing history.
+Handle ambiguity by asking a short clarifying question. When a question cannot be answered from the data, say so plainly. Show a “How I calculated this” expander with the query used. Refuse requests unrelated to the dataset politely.
+5.11 Reports
+
+Downloadable, branded (navy header, gold rule, BritConnect title block, date, dataset version) reports in PDF, Excel, and CSV:
+
+Executive Summary Report (KPIs, key charts, AI narrative, top actions)
+Data Quality and Cleaning Report
+Model Performance Report (metrics, curves, importance, threshold, limitations)
+At-Risk Customer List (filtered, with drivers and recommended actions)
+Segment Report
+Campaign Performance Report
+Retention Plan Pack (per customer or per segment)
+Report builder: pick sections, add notes, preview, and download. Optional scheduled summary reminders. Charts in reports must match the on-screen styling exactly, with no gridlines.
+5.12 Settings & Data Management
+
+Risk-tier thresholds, “as of” date, currency formatting (GBP default), assumption defaults (save rate, offer cost, margin), model and cleaning options, theme, a data retention view (storage used), Export all data and models, Import backup, and Clear all data (double-confirmation). Show an audit log of uploads, cleaning actions, training runs, and exports.
+
+6. ACCURACY AND ROBUSTNESS REQUIREMENTS
+All calculations are deterministic, centralised, and unit-tested: churn rate = churned ÷ total customers in the filtered set, ARPU = mean Monthly Charge, revenue at risk = defined consistently everywhere, and a metrics glossary page explains every KPI formula.
+Guard against divide-by-zero, NaN, and empty filters (show “No data for this selection” with a reset option). Suppress or flag percentages for groups with n < 30.
+Never leak the target into features, never fit encoders or scalers on test data, and apply identical transformations at scoring time.
+Handle files up to roughly 200k rows smoothly (chunked parsing, workers, virtualised tables) and show progress indicators. Errors are shown in friendly language with suggested fixes and never as raw stack traces. Add an error boundary around each page.
+Add a disclosure panel on the model page stating limitations: correlation is not causation, performance depends on data quality, and predictions support rather than replace human judgement.
+Data stays in the browser by default. State clearly in the UI which data (aggregated statistics only) is sent to Gemini, and offer a “Do not send customer-level data to AI” privacy toggle (on by default) that restricts the chatbot and recommendations to aggregates and anonymised IDs unless the user opts in.
+7. UX DETAILS
+First-run onboarding: a three-step guide (Upload → Review cleaning → Train and score), with a downloadable sample data template matching the dictionary and a built-in demo dataset generator (synthetic, realistic, clearly labelled as synthetic).
+A persistent progress stepper on the Data Hub, toast notifications, skeleton loaders, tooltips explaining each metric, and keyboard shortcuts for search (/).
+Every table supports search, sort, filter, column visibility, and export. Every page has a concise “How to read this page” help drawer.
+Consistent micro-interactions: gold focus rings, subtle hover elevation, smooth transitions that respect prefers-reduced-motion.
+8. BUILD INSTRUCTIONS FOR YOU (THE GENERATOR)
+First output a short architecture summary (folder structure, data flow, state management, and the schema config), then generate the complete code, organised into modular files (/pages, /components, /charts, /ml, /workers, /services, /utils, /config).
+Implement everything above. If any feature must be simplified, state exactly what was simplified and why, and implement the closest working alternative rather than leaving a stub.
+Include unit tests for metric calculations, cleaning rules, feature engineering, and leakage checks.
+Include a README covering setup, environment variables, the data schema, supported formats, how models are trained, and known limitations.
+Before finishing, self-review against this checklist: formats supported · data persists until new data is added · validation and cleaning · features · three models and metrics · scoring · explainability · segmentation · recommendations with steps, priority, impact, KPIs · campaign tracking · chatbot with tool-based accuracy · navy/gold/dark-red theme · no gridlines on any chart · responsive layout · downloadable reports.
+
+Notes on how I shaped this for your data:
+
+Leakage protection is built in. Your dictionary contains post-churn fields (Churn Date, Churn Reason, Churn Status) and Monthly Revenue At Risk, which would let a model “cheat”. The prompt blocks them from training and uses Churn Reason only for descriptive analysis.
+Tenure Months and Lifetime Revenue GBP can also leak, because churned customers stop accumulating both. The prompt flags this with a toggle so you can decide.
+UK-specific details are included: GBP formatting, dd/mm/yyyy date parsing, UK Nation analysis, and UK GDPR, PECR, and Ofcom compliance notes in the recommendations.
+Fairness: Gender and Age are available for analysis, but the recommendations are instructed not to base offers on them.
